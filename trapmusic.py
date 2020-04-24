@@ -1,103 +1,111 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Apr  8 13:29:32 2020
-
-This file contains functions
-trapscan_presetori
-trapscan_optori
-@author: Matti Stenroos, matti.stenroos@aalto.fi
+trapmusic_python
+trapmusic_python is licensed under BSD 3-Clause License.
+Copyright (c) 2020, Matti Stenroos.
+All rights reserved.
+The software comes without any warranty.
 """
-import numpy
-import scipy
-def trapscan_presetori(Cmeas, Lscan, NITER):
+import numpy as np
+from scipy.linalg import eigh, eigvalsh
+def trapscan_presetori(C_meas, L_scan, n_iter):
     '''
     Performs a TRAP-MUSIC scan using sources with pre-set orientation
 
     Parameters
     ----------
-    Cmeas : numpy.array, N_sensors x N_sensors 
+    C_meas : numpy.array, n_sensors x n_sensors 
         Measurement covariance matrix.
-    Lscan : numpy.array, N_sensors x N_scan
+    L_scan : numpy.array, n_sensors x n_scan
         Forward model i.e. a lead field matrix that contains topographies of
-        N_scan source candidates (for example, oriented normal to cortex)
-    NITER : integer
+        n_scan source candidates (for example, oriented normal to cortex)
+    n_iter : integer
         How many scanning iterations are performed; this should be equal to or
         slightly larger than the assumed number of sources.
 
     Returns
     -------
-    maxind, mumax, mus
-        maxind : indices of found sources (indices to Lscan)
-        mumax  : scanning-function values for the found sources; "true"
-                 sources have mumax close to 1, false sources closer to 0.
+    ind_max, mu_max, mus
+        ind_max : indices of found sources (indices to L_scan)
+        mu_max  : scanning-function values for the found sources; "true"
+                 sources have mu_max close to 1, false sources closer to 0.
         mus    : scanning-function values for all sources all iterations.        
     
-    The implementation is based on 
+    Based on  
     Makela, Stenroos, Sarvas, Ilmoniemi. Truncated RAP-MUSIC (TRAP-MUSIC) for
     MEG and EEG source localization. NeuroImage 167(2018):73--83.
-    Please cite the paper, if you use the approach / function.
+    https://doi.org/10.1016/j.neuroimage.2017.11.013
+    For further information, please see the paper. I also kindly ask you to 
+    cite the paper, if you use the approach and/or this implementation.
+    If you do not have access to the paper, please send a request by email.
     
-    This version is "private", for your eyes only. A public version with
-    identical contents / interface will follow soon.
-    v200409 (c) Matti Stenroos, matti.stenroos@aalto.fi
+    trapmusic_python.trapscan_presetori
+    trapmusic_python is licensed under BSD 3-Clause License.
+    Copyright (c) 2020, Matti Stenroos.
+    All rights reserved.
+    The software comes without any warranty.
+    
+    v200424 Matti Stenroos, matti.stenroos@aalto.fi
     '''
-    Nsens = len(Lscan)
-    Nscan = len(Lscan[0])
-    
+    n_sens, n_scan = np.shape(L_scan)
     # output variables
-    maxind = numpy.zeros(NITER,int)
-    mumax = numpy.zeros(NITER)
-    mus = numpy.zeros((Nscan,NITER))
+    ind_max = np.zeros(n_iter, int)
+    mu_max = np.zeros(n_iter)
+    mus = np.zeros((n_scan, n_iter))
     # temporary arrays
-    B = numpy.zeros((Nsens,NITER))
-    Qk = numpy.zeros((Nsens,Nsens))
+    B = np.zeros((n_sens, n_iter))
+    Qk = np.zeros((n_sens, n_sens))
     
     # SVD & signal subspace of the original covariance matrix
-    Utemp,_,_  = numpy.linalg.svd(Cmeas, full_matrices = True)
-    Uso = Utemp[:,0:NITER]
+    Utemp,_,_  = np.linalg.svd(C_meas, full_matrices = True)
+    Uso = Utemp[:, 0:n_iter]
     # the subspace basis and lead field matrix for k:th iteration
-    Lthis = Lscan
+    L_this = L_scan
     Uk = Uso
 
     #TRAP iteration
-    for ITER in range(0,NITER):
+    for iter in range(0, n_iter):
         # subspace projection, removing the previously found topographies 
-        if ITER>0:
+        if iter > 0:
             # apply out-projection to the forward model
-            Lthis = Qk@Lscan
-            Us,_,_ = numpy.linalg.svd(Qk@Uso, full_matrices = True)
+            L_this = Qk@L_scan
+            Us,_,_ = np.linalg.svd(Qk@Uso, full_matrices = True)
             # TRAP truncation i.e. removing the previously-found topographies
-            Uk = Us[:,0:(NITER-ITER+1)]
-        #Norm of the current Lscan 
-        Lthisnormsq = numpy.sum(Lthis*Lthis,0)
-        # norm of the projection of current Lscan onto the current signal space
-        PsLnormsq = numpy.sum((Uk.T@Lthis)**2,0)
+            Uk = Us[:, 0:(n_iter - iter + 1)]
+        #Norm of the current L_scan 
+        L_thisnormsq = np.sum(L_this*L_this, 0)
+        # norm of the projection of current L_scan onto the current signal space
+        PsLnormsq = np.sum((Uk.T@L_this)**2, 0)
         # scanning function value                    
-        mus[:,ITER] = PsLnormsq/Lthisnormsq
+        mus[:, iter] = PsLnormsq/L_thisnormsq
+        # with poorly-visible sources, numerical behavior might lead to
+        # re-finding the same source again (despite out-projection) -> remove
+        if iter > 0:
+            mus[ind_max[0:iter],iter] = 0
         # maximum of the scanning function
-        maxind[ITER] = numpy.argmax(mus[:,ITER])
-        mumax[ITER] = mus[maxind[ITER],ITER] 
+        ind_max[iter] = np.argmax(mus[:, iter])
+        mu_max[iter] = mus[ind_max[iter], iter] 
         # make the next out-projector
-        if ITER<NITER-1:
-            B[:,ITER] = Lscan[:,maxind[ITER]]
-            l = B[:,0:(ITER+1)]
-            Qk = numpy.eye(Nsens)-l@numpy.linalg.pinv(l)
+        if iter < n_iter - 1:
+            B[:, iter] = L_scan[:, ind_max[iter]]
+            l = B[:, 0:(iter + 1)]
+            Qk = np.eye(n_sens) - l@np.linalg.pinv(l)
     
-    return [maxind,mumax,mus]
+    return ind_max, mu_max, mus
 
-def trapscan_optori(Cmeas, Lscan, NITER, Ldim = 3):
+def trapscan_optori(C_meas, L_scan, n_iter, Ldim = 3):
     '''
     Performs a TRAP-MUSIC scan with optimized source orientations
 
     Parameters
     ----------
-    Cmeas : numpy.array, N_sensors x N_sensors 
+    C_meas : numpy.array, N_sensors x N_sensors 
         Measurement covariance matrix.
-    Lscan : numpy.array, N_sensors x (N_scan x Ldim)
+    L_scan : numpy.array, N_sensors x (N_scan x Ldim)
         Forward model i.e. a lead field matrix that contains topographies of
         N_scan source candidates in the form [t_1i, t_1j t_1k, t_2i,...], 
         where i, j, and k mark orthogonal source orientations.
-    NITER : integer
+    n_iter : integer
         How many scanning iterations are performed. This should be equal to or
         slightly larger than the assumed number of sources.
     Ldim : integer (optional, default 3)
@@ -108,88 +116,93 @@ def trapscan_optori(Cmeas, Lscan, NITER, Ldim = 3):
         
     Returns
     -------
-    maxind, mumax, etas. mus
-        maxind : indices of found sources (indices to Lscan)
-        mumax  : scanning-function values for the found sources; "true"
-                 sources have mumax close to 1, false sources closer to 0.
-        etamax : orientations of the found sources, (Niter x Ldim)
+    ind_max, mu_max, etas,  mus
+        ind_max : indices of found sources (indices to L_scan)
+        mu_max  : scanning-function values for the found sources; "true"
+                 sources have mu_max close to 1, false sources closer to 0.
+        eta_max : orientations of the found sources, (n_iter x Ldim)
         mus    : scanning-function values for all sources all iterations.        
     
-    The implementation is based on 
+    Based on  
     Makela, Stenroos, Sarvas, Ilmoniemi. Truncated RAP-MUSIC (TRAP-MUSIC) for
     MEG and EEG source localization. NeuroImage 167(2018):73--83.
-    Please cite the paper, if you use the approach / function.
+    https://doi.org/10.1016/j.neuroimage.2017.11.013
+    For further information, please see the paper. I also kindly ask you to 
+    cite the paper, if you use the approach and/or this implementation.
+    If you do not have access to the paper, please send a request by email.
     
-    This version is "private", for your eyes only. A public version with
-    identical contents / interface will follow soon.
-    v200409 (c) Matti Stenroos, matti.stenroos@aalto.fi
+    trapmusic_python.trapscan_optori
+    trapmusic_python is licensed under BSD 3-Clause License.
+    Copyright (c) 2020, Matti Stenroos.
+    All rights reserved.
+    The software comes without any warranty.
+    
+    v200424 Matti Stenroos, matti.stenroos@aalto.fi
     '''
     
-    Nsens, Ntopo = numpy.shape(Lscan)
+    n_sens, Ntopo = np.shape(L_scan)
     if Ntopo%Ldim:
-        print('Dimensions of Lscan do not match with given Ldim.')
+        raise ValueError('Dimensions of L_scan do not match with given Ldim.')
         return
-    Nscan = int(Ntopo/Ldim)
+    n_scan = int(Ntopo/Ldim)
     
     # output variables
-    maxind = numpy.zeros(NITER,int)
-    mumax = numpy.zeros(NITER)
-    etamax = numpy.zeros((NITER,Ldim))
-    mus = numpy.zeros((Nscan,NITER))
+    ind_max = np.zeros(n_iter, int)
+    mu_max = np.zeros(n_iter)
+    eta_max = np.zeros((n_iter, Ldim))
+    mus = np.zeros((n_scan, n_iter))
     # temporary arrays
-    B = numpy.zeros((Nsens,NITER))
-    Qk = numpy.zeros((Nsens,Nsens))
+    B = np.zeros((n_sens, n_iter))
+    Qk = np.zeros((n_sens, n_sens))
     
     # SVD & space of the original covariance matrix
-    Utemp,_,_  = numpy.linalg.svd(Cmeas, full_matrices = True)
-    Uso = Utemp[:,0:NITER]
+    Utemp,_,_  = np.linalg.svd(C_meas, full_matrices = True)
+    Uso = Utemp[:, 0:n_iter]
     
     # the subspace basis and lead field matrix for k:th iteration
-    Lthis = Lscan
+    L_this = L_scan
     Uk = Uso
 
     # TRAP iteration
-    for ITER in range(0,NITER):
-        print(ITER, end = ' ')
+    for iter in range(0, n_iter):
         # subspace projection, removing previously found topographies 
-        if ITER>0:
+        if iter>0:
             # apply out-projection to forward model
-            Lthis = Qk@Lscan
-            Us,_,_ = numpy.linalg.svd(Qk@Uso, full_matrices = True)
+            L_this = Qk@L_scan
+            Us,_,_ = np.linalg.svd(Qk@Uso, full_matrices = True)
             # TRAP truncation
-            Uk = Us[:,0:(NITER-ITER)]
+            Uk = Us[:, 0:(n_iter - iter)]
         
         # project L to this signal subspace
-        UkLthis = Uk.T@Lthis
+        UkL_this = Uk.T@L_this
         # scan over all test sources
-        for I in range(0,Nscan):
+        for i in range(0, n_scan):
             # if a source has already been found for this location, skip
-            if any(maxind[0:ITER] == I):
+            if any(ind_max[0:iter] == i):
                 continue
             # local lead field matrix for this source location
-            L = Lthis[:,Ldim*I:(Ldim*I+Ldim)]
-            UkL = UkLthis[:,Ldim*I:(Ldim*I+Ldim)]
+            L = L_this[:, Ldim*i:(Ldim*i + Ldim)]
+            UkL = UkL_this[:, Ldim*i:(Ldim*i + Ldim)]
             # find the largest mu for this L
-            mus[I,ITER] = scipy.linalg.eigvalsh(UkL.T@UkL,L.T@L,eigvals = (Ldim-1,Ldim-1))
+            mus[i, iter] = eigvalsh(UkL.T@UkL, L.T@L, eigvals = (Ldim - 1, Ldim - 1))
         
         # find the source with the largest mu
-        mi = numpy.argmax(mus[:,ITER])
-        maxind[ITER] = mi
-        mumax[ITER] = mus[mi,ITER]
+        mi = np.argmax(mus[:, iter])
+        ind_max[iter] = mi
+        mu_max[iter] = mus[mi, iter]
         
         # grab the corresponding L and extract orientation
-        L = Lthis[:,Ldim*mi:(Ldim*mi+Ldim)]
-        UkL = UkLthis[:,Ldim*mi:(Ldim*mi+Ldim)]
-        _ ,  maxeta = scipy.linalg.eigh(UkL.T@UkL,L.T@L,eigvals = (Ldim-1,Ldim-1))
-        maxeta = maxeta/scipy.linalg.norm(maxeta)   
-        etamax[ITER,:] = maxeta.T
+        L = L_this[:, Ldim*mi:(Ldim*mi + Ldim)]
+        UkL = UkL_this[:, Ldim*mi:(Ldim*mi + Ldim)]
+        _ ,  maxeta = eigh(UkL.T@UkL, L.T@L, eigvals = (Ldim - 1, Ldim - 1))
+        maxeta = maxeta/np.linalg.norm(maxeta)   
+        eta_max[iter, :] = maxeta.T
         
         # make the next out-projector
-        if ITER<NITER-1:
-            L = Lscan[:,Ldim*mi:(Ldim*mi+Ldim)]
-            B[:,ITER] = (L@maxeta).T
-            l = B[:,0:(ITER+1)]
-            Qk = numpy.eye(Nsens)-l@numpy.linalg.pinv(l)
+        if iter < n_iter - 1:
+            L = L_scan[:, Ldim*mi:(Ldim*mi + Ldim)]
+            B[:, iter] = (L@maxeta).T
+            l = B[:, 0:(iter + 1)]
+            Qk = np.eye(n_sens) - l@np.linalg.pinv(l)
     
-    print()
-    return [maxind,mumax,etamax,mus]
+    return ind_max, mu_max, eta_max, mus
